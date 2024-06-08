@@ -1211,6 +1211,7 @@ dependencies = [
  "globset",
  "hashbrown",
  "helix-loader",
+ "helix-parsec",
  "helix-stdx",
  "imara-diff",
  "indoc",
