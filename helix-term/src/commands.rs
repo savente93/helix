@@ -5,7 +5,7 @@ pub(crate) mod typed;
 pub use dap::*;
 use futures_util::FutureExt;
 use helix_event::status;
-use helix_parsec::{sep, seq, take_until, Parser};
+use helix_parsec::{seq, take_until, Parser};
 use helix_stdx::{
     path::expand_tilde,
     rope::{self, RopeSliceExt},
@@ -18,7 +18,7 @@ pub use typed::*;
 use helix_core::{
     char_idx_at_visual_offset,
     chars::char_is_word,
-    comment, coords_at_pos,
+    comment,
     doc_formatter::TextFormat,
     encoding, find_workspace,
     graphemes::{self, next_grapheme_boundary, RevRopeGraphemes},
