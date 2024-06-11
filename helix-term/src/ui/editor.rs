@@ -18,13 +18,13 @@ use helix_core::{
     movement::Direction,
     syntax::{self, HighlightEvent},
     text_annotations::TextAnnotations,
-    unicode::width::UnicodeWidthStr,
+    unicode::{segmentation::UnicodeSegmentation, width::UnicodeWidthStr},
     visual_offset_from_block, Change, Position, Range, Selection, Transaction,
 };
 use helix_view::{
     annotations::diagnostics::DiagnosticFilter,
     document::{Mode, SavePoint, SCRATCH_BUFFER_NAME},
-    editor::{CompleteAction, CursorShapeConfig},
+    editor::{BufferLine, CompleteAction, CursorShapeConfig},
     graphics::{Color, CursorKind, Modifier, Rect, Style},
     input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind},
     keyboard::{KeyCode, KeyModifiers},
@@ -57,6 +57,15 @@ pub enum InsertEvent {
     },
     TriggerCompletion,
     RequestCompletion,
+}
+
+#[derive(Debug, Clone)]
+pub struct BufferTab {
+    active: bool,
+    text: String,
+    width: u16,
+    x: i32,
+    style: Style,
 }
 
 impl Default for EditorView {
@@ -592,6 +601,7 @@ impl EditorView {
 
     /// Render bufferline at the top
     pub fn render_bufferline(editor: &Editor, viewport: Rect, surface: &mut Surface) {
+        let scratch = PathBuf::from(SCRATCH_BUFFER_NAME); // default filename to use for scratch buffer
         surface.clear_with(
             viewport,
             editor
@@ -610,10 +620,13 @@ impl EditorView {
             .try_get("ui.bufferline")
             .unwrap_or_else(|| editor.theme.get("ui.statusline.inactive"));
 
-        let mut x = viewport.x;
+        let mut x = viewport.x as i32;
         let current_doc = view!(editor).doc;
 
         let documents_paths = build_bufferline_paths(editor);
+
+        // Gather info on buffertabs
+        let mut buffertabs = Vec::new();
 
         for doc in editor.documents() {
             let fname = if let Some(name) = documents_paths.get(&doc.id()) {
@@ -621,24 +634,93 @@ impl EditorView {
             } else {
                 SCRATCH_BUFFER_NAME.to_string()
             };
+            let active = current_doc == doc.id();
 
-            let style = if current_doc == doc.id() {
+            let style = if active {
                 bufferline_active
             } else {
                 bufferline_inactive
             };
 
             let text = format!(" {}{} ", fname, if doc.is_modified() { "[+]" } else { "" });
-            let used_width = viewport.x.saturating_sub(x);
-            let rem_width = surface.area.width.saturating_sub(used_width);
+            let text_width = text.grapheme_indices(true).count();
 
-            x = surface
-                .set_stringn(x, viewport.y, text, rem_width as usize, style)
-                .0;
+            buffertabs.push(BufferTab {
+                active,
+                text,
+                width: text_width as _,
+                x,
+                style,
+            });
+            x = x.saturating_add(text_width as _);
+        }
 
-            if x >= surface.area.right() {
+        surface.clear_with(
+            viewport,
+            editor
+                .theme
+                .try_get("ui.bufferline.background")
+                .unwrap_or_else(|| editor.theme.get("ui.statusline")),
+        );
+
+        // Scroll the tabs correctly
+        let viewport_center = (viewport.width as f64 / 2.).floor() as i32 + viewport.x as i32;
+
+        let active_buffertab = buffertabs.iter().find(|tab| tab.active).unwrap();
+
+        let active_buffertab_center =
+            (active_buffertab.width as f64 / 2.).floor() as i32 + active_buffertab.x;
+
+        let right_of_center = active_buffertab_center as i32 - viewport_center as i32;
+
+        if right_of_center > 0 {
+            let rightmost = buffertabs.last().unwrap();
+            let full_width = rightmost.x + rightmost.width as i32;
+
+            let max_displacement = (full_width - viewport.width as i32).max(0);
+            let displacement = right_of_center.min(max_displacement);
+
+            for tab in buffertabs.iter_mut() {
+                tab.x = tab.x.saturating_sub(displacement.abs());
+            }
+        } // If on center, or left of center, nothing to do
+
+        // Itterate over buffertabs, skip or slice them if left off screen, stop if right of screen.
+        for tab in buffertabs.iter_mut() {
+            if tab.x < viewport.x as i32 {
+                if tab.x + tab.width as i32 > viewport.x as i32 {
+                    // Draw on screen portion
+                    let new_width = tab.width as i32 + tab.x;
+
+                    tab.text = tab
+                        .text
+                        .graphemes(true)
+                        .into_iter()
+                        .skip((tab.width as i32 - new_width) as usize)
+                        .collect();
+
+                    tab.width -= new_width as u16;
+                    tab.x = viewport.x as _;
+                } else {
+                    // Skip tabs completely of screen
+                    continue;
+                }
+            }
+            if tab.x > viewport.right() as i32 {
+                // Stop when off screen to the right
                 break;
             }
+
+            // Actually put the string on the screen
+            let _ = surface
+                .set_stringn(
+                    tab.x as _,
+                    viewport.y,
+                    tab.text.clone(),
+                    (viewport.right() as usize).saturating_sub(tab.x as _),
+                    tab.style,
+                )
+                .0;
         }
     }
 
@@ -1472,7 +1554,6 @@ impl Component for EditorView {
         let config = cx.editor.config();
 
         // check if bufferline should be rendered
-        use helix_view::editor::BufferLine;
         let use_bufferline = match config.bufferline {
             BufferLine::Always => true,
             BufferLine::Multiple if cx.editor.documents.len() > 1 => true,
