@@ -919,7 +919,7 @@ mod test {
 
     #[test]
     fn parse_range() -> Result<(), String> {
-        // sometimes we want Ok, someteimes we want Err, but we never want a panic
+        // sometimes we want Ok, sometimes we want Err, but we never want a panic
         assert_eq!(
             Range::try_from("(0,28)"),
             Ok(Range {
