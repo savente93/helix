@@ -581,6 +581,7 @@ fn goto_mark(
         )
         .unwrap_or('^');
 
+    let scrolloff = cx.editor.config().scrolloff;
     // use some helper functions to avoid making the borrow checker angry
     let registers_vals = read_from_register(cx.editor, register_name);
     let (doc_id, history_rev, mut selection) = parse_mark_register_contents(registers_vals)?;
@@ -598,6 +599,9 @@ fn goto_mark(
     };
 
     doc.set_selection(view.id, selection);
+
+    view.ensure_cursor_in_view(doc, scrolloff);
+
     Ok(())
 }
 
