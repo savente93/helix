@@ -18,7 +18,7 @@
 | `:new`, `:n` | Create a new scratch buffer. |
 | `:goto-mark` | Go to the selection saved in a register. Register can be provided as argument or selected register else ^ will be used |
 | `:register-mark` | Save current selection into a register. Register can be provided as argument or selected register else ^ will be used |
-| `:format`, `:fmt` | Format the file using the LSP formatter. |
+| `:format`, `:fmt` | Format the file using an external formatter or language server. |
 | `:indent-style` | Set the indentation style for editing. ('t' for tabs or 1-16 for number of spaces.) |
 | `:line-ending` | Set the document's default line ending. Options: crlf, lf. |
 | `:earlier`, `:ear` | Jump back to an earlier point in edit history. Accepts a number of steps or a time span. |
@@ -74,7 +74,7 @@
 | `:sort` | Sort ranges in selection. |
 | `:rsort` | Sort ranges in selection in reverse order. |
 | `:reflow` | Hard-wrap the current selection of lines to a given width. |
-| `:tree-sitter-subtree`, `:ts-subtree` | Display tree sitter subtree under cursor, primarily for debugging queries. |
+| `:tree-sitter-subtree`, `:ts-subtree` | Display the smallest tree-sitter subtree that spans the primary selection, primarily for debugging queries. |
 | `:config-reload` | Refresh user config. |
 | `:config-open` | Open the user config.toml file. |
 | `:config-open-workspace` | Open the workspace config.toml file. |

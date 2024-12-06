@@ -689,7 +689,7 @@ impl Selection {
     pub fn fragments<'a>(
         &'a self,
         text: RopeSlice<'a>,
-    ) -> impl DoubleEndedIterator<Item = Cow<'a, str>> + ExactSizeIterator<Item = Cow<str>> + 'a
+    ) -> impl DoubleEndedIterator<Item = Cow<'a, str>> + ExactSizeIterator<Item = Cow<'a, str>>
     {
         self.ranges.iter().map(move |range| range.fragment(text))
     }
@@ -773,7 +773,7 @@ pub struct LineRangeIter<'a> {
     text: RopeSlice<'a>,
 }
 
-impl<'a> Iterator for LineRangeIter<'a> {
+impl Iterator for LineRangeIter<'_> {
     type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
