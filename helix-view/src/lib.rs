@@ -18,7 +18,11 @@ pub mod theme;
 pub mod tree;
 pub mod view;
 
-use std::{borrow::Cow, num::NonZeroUsize, path::Path};
+use std::{
+    borrow::Cow,
+    num::{NonZeroUsize, ParseIntError},
+    path::Path,
+};
 
 // uses NonZeroUsize so Option<DocumentId> use a byte rather than two
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
