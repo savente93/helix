@@ -1,0 +1,421 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index c6c174985..d48441d50 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -1429,7 +1429,6 @@ dependencies = [
+  "crossterm",
+  "fern",
+  "futures-util",
+- "globset",
+  "grep-regex",
+  "grep-searcher",
+  "helix-core",
+@@ -1513,7 +1512,6 @@ dependencies = [
+  "helix-stdx",
+  "helix-tui",
+  "helix-vcs",
+- "ignore",
+  "libc",
+  "log",
+  "once_cell",
+diff --git a/Cargo.toml b/Cargo.toml
+index d7fa73909..6206281b7 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -16,7 +16,7 @@ members = [
+ ]
+ 
+ default-members = [
+-  "helix-term",
++  "helix-term"
+ ]
+ 
+ [profile.release]
+@@ -37,11 +37,9 @@ package.helix-tui.opt-level = 2
+ package.helix-term.opt-level = 2
+ 
+ [workspace.dependencies]
+-globset = "0.4.14"
+-ignore = "0.4"
++tree-sitter = { version = "0.22" }
+ nucleo = "0.2.0"
+ slotmap = "1.0.7"
+-tree-sitter = "0.22"
+ 
+ [workspace.package]
+ version = "24.3.0"
+diff --git a/helix-core/Cargo.toml b/helix-core/Cargo.toml
+index 1c19af55f..53d4af359 100644
+--- a/helix-core/Cargo.toml
++++ b/helix-core/Cargo.toml
+@@ -51,7 +51,7 @@ textwrap = "0.16.1"
+ 
+ nucleo.workspace = true
+ parking_lot = "0.12"
+-globset.workspace = true
++globset = "0.4.14"
+ 
+ [dev-dependencies]
+ quickcheck = { version = "1", default-features = false }
+diff --git a/helix-lsp/Cargo.toml b/helix-lsp/Cargo.toml
+index 474a21c59..b1b267347 100644
+--- a/helix-lsp/Cargo.toml
++++ b/helix-lsp/Cargo.toml
+@@ -21,7 +21,7 @@ helix-parsec = { path = "../helix-parsec" }
+ anyhow = "1.0"
+ futures-executor = "0.3"
+ futures-util = { version = "0.3", features = ["std", "async-await"], default-features = false }
+-globset.workspace = true
++globset = "0.4.14"
+ log = "0.4"
+ lsp-types = { version = "0.95" }
+ serde = { version = "1.0", features = ["derive"] }
+diff --git a/helix-term/Cargo.toml b/helix-term/Cargo.toml
+index a7320d61c..e67a03892 100644
+--- a/helix-term/Cargo.toml
++++ b/helix-term/Cargo.toml
+@@ -51,7 +51,7 @@ log = "0.4"
+ 
+ # File picker
+ nucleo.workspace = true
+-ignore.workspace = true
++ignore = "0.4"
+ # markdown doc rendering
+ pulldown-cmark = { version = "0.10", default-features = false }
+ # file type detection
+@@ -71,9 +71,7 @@ serde = { version = "1.0", features = ["derive"] }
+ grep-regex = "0.1.12"
+ grep-searcher = "0.1.13"
+ 
+-globset.workspace = true
+-
+-[target.'cfg(not(windows))'.dependencies] # https://github.com/vorner/signal-hook/issues/100
++[target.'cfg(not(windows))'.dependencies]  # https://github.com/vorner/signal-hook/issues/100
+ signal-hook-tokio = { version = "0.3", features = ["futures-v0_3"] }
+ libc = "0.2.154"
+ 
+diff --git a/helix-term/src/commands.rs b/helix-term/src/commands.rs
+index 9f58e9b86..7be2ea095 100644
+--- a/helix-term/src/commands.rs
++++ b/helix-term/src/commands.rs
+@@ -86,7 +86,7 @@
+ 
+ use grep_regex::RegexMatcherBuilder;
+ use grep_searcher::{sinks, BinaryDetection, SearcherBuilder};
+-use ignore::{DirEntry, WalkState};
++use ignore::{DirEntry, WalkBuilder, WalkState};
+ 
+ pub type OnKeyCallback = Box<dyn FnOnce(&mut Context, KeyEvent)>;
+ 
+@@ -2324,16 +2324,26 @@ fn format(&self, current_path: &Self::Data) -> Row {
+                     .canonicalize()
+                     .unwrap_or_else(|_| search_root.clone());
+                 let injector_ = injector.clone();
+-                let mut walk_builder = file_picker_config.walk_builder(search_root);
+ 
+                 std::thread::spawn(move || {
+                     let searcher = SearcherBuilder::new()
+                         .binary_detection(BinaryDetection::quit(b'\x00'))
+                         .build();
+ 
+-                    walk_builder.filter_entry(move |entry| {
+-                        filter_picker_entry(entry, &absolute_root, dedup_symlinks)
+-                    });
++                    let mut walk_builder = WalkBuilder::new(search_root);
++
++                    walk_builder
++                        .hidden(file_picker_config.hidden)
++                        .parents(file_picker_config.parents)
++                        .ignore(file_picker_config.ignore)
++                        .follow_links(file_picker_config.follow_symlinks)
++                        .git_ignore(file_picker_config.git_ignore)
++                        .git_global(file_picker_config.git_global)
++                        .git_exclude(file_picker_config.git_exclude)
++                        .max_depth(file_picker_config.max_depth)
++                        .filter_entry(move |entry| {
++                            filter_picker_entry(entry, &absolute_root, dedup_symlinks)
++                        });
+ 
+                     walk_builder
+                         .add_custom_ignore_filename(helix_loader::config_dir().join("ignore"));
+diff --git a/helix-term/src/commands/typed.rs b/helix-term/src/commands/typed.rs
+index 64d179a52..f38ae6bba 100644
+--- a/helix-term/src/commands/typed.rs
++++ b/helix-term/src/commands/typed.rs
+@@ -1,27 +1,19 @@
+ use std::fmt::Write;
+-use std::fs;
+ use std::io::BufReader;
+ use std::ops::Deref;
+-use std::sync::atomic::{AtomicBool, Ordering};
+-use std::sync::Mutex;
+ 
+ use crate::job::Job;
+ 
+ use super::*;
+ 
+-use globset::{GlobBuilder, GlobSetBuilder};
+ use helix_core::fuzzy::fuzzy_match;
+ use helix_core::indent::MAX_INDENT;
+-use helix_core::{encoding, line_ending, shellwords::Shellwords};
++use helix_core::{line_ending, shellwords::Shellwords};
+ use helix_view::document::{read_to_string, DEFAULT_LANGUAGE_NAME};
+-use helix_view::editor::{Action, CloseError, ConfigEvent};
+-use ignore::WalkBuilder;
++use helix_view::editor::{CloseError, ConfigEvent};
+ use serde_json::Value;
+ use ui::completers::{self, Completer};
+ 
+-// The maximum number of files to open with globbing to avoid freezing while trying to open too many files.
+-const GLOBBING_MAX_N_FILES: usize = 64;
+-
+ #[derive(Clone)]
+ pub struct TypableCommand {
+     pub name: &'static str,
+@@ -111,142 +103,38 @@ fn force_quit(
+     Ok(())
+ }
+ 
+-fn open_file(cx: &mut compositor::Context, path: &Path, pos: Position) -> anyhow::Result<()> {
+-    let _ = cx.editor.open(path, Action::Replace)?;
+-    let (view, doc) = current!(cx.editor);
+-    let pos = Selection::point(pos_at_coords(doc.text().slice(..), pos, true));
+-    doc.set_selection(view.id, pos);
+-    // does not affect opening a buffer without pos
+-    align_view(doc, view, Align::Center);
+-    Ok(())
+-}
+-
+ fn open(cx: &mut compositor::Context, args: &[Cow<str>], event: PromptEvent) -> anyhow::Result<()> {
+     if event != PromptEvent::Validate {
+         return Ok(());
+     }
+ 
+     ensure!(!args.is_empty(), "wrong argument count");
+-
+     for arg in args {
+         let (path, pos) = args::parse_file(arg);
+-        let path = helix_stdx::path::canonicalize(path);
+-
+-        // Shortcut for opening an existing path without globbing
+-        if let Ok(metadata) = fs::metadata(&path) {
+-            // Path exists
+-            let file_type = metadata.file_type();
+-            if file_type.is_dir() {
+-                // If the path is a directory, open a file picker on that directory
+-                let callback = async move {
+-                    let call: job::Callback = job::Callback::EditorCompositor(Box::new(
+-                        move |editor: &mut Editor, compositor: &mut Compositor| {
+-                            let picker = ui::file_picker(path, &editor.config());
+-                            compositor.push(Box::new(overlaid(picker)));
+-                        },
+-                    ));
+-                    Ok(call)
+-                };
+-                cx.jobs.callback(callback);
+-            } else if file_type.is_file() {
+-                open_file(cx, &path, pos)?;
+-            } else {
+-                bail!("{} is not a regular file", path.display());
+-            }
+-            continue;
+-        }
+-
+-        let path_str = path.to_str().context("invalid unicode")?;
+-        if !path_str.as_bytes().iter().any(|c| b"*?{}[]".contains(c)) {
+-            // Not a glob, open the file to avoid unneeded walking of huge directories
+-            open_file(cx, &path, pos)?;
+-            continue;
+-        }
+-
+-        let glob = GlobBuilder::new(path_str)
+-            .literal_separator(true)
+-            .empty_alternates(true)
+-            .build()
+-            .context("invalid glob")?;
+-        // Using a glob set instead of `compile_matcher` because the single matcher is always
+-        // a regex matcher. A glob set tries other strategies first which can be more efficient.
+-        // Example: `**/FILENAME` only compares the base name instead of matching with regex.
+-        let glob_set = GlobSetBuilder::new()
+-            .add(glob)
+-            .build()
+-            .context("invalid glob")?;
+-
+-        let mut root = None;
+-        let mut comps = path.components();
+-
+-        // Iterate over all parents
+-        while comps.next_back().is_some() {
+-            let parent = comps.as_path();
+-
+-            if parent.exists() {
+-                // Found the first parent that exists
+-                root = Some(parent);
+-                break;
+-            }
+-        }
+-
+-        let root = root.context("invalid glob")?;
+-        let to_open = Mutex::new(Vec::with_capacity(GLOBBING_MAX_N_FILES));
+-        let exceeded_max_n_files = AtomicBool::new(false);
+-
+-        WalkBuilder::new(root)
+-            // Traversing symlinks makes the time explode.
+-            // Not even sure if non-trivial cycles are detected.
+-            // Because we don't have a timeout, we should better ignore symlinks.
+-            .follow_links(false)
+-            .standard_filters(false)
+-            .build_parallel()
+-            .run(|| {
+-                Box::new(|entry| {
+-                    if exceeded_max_n_files.load(Ordering::Relaxed) {
+-                        return WalkState::Quit;
+-                    }
+-
+-                    let Ok(entry) = entry else {
+-                        return WalkState::Continue;
+-                    };
+-                    if !glob_set.is_match(entry.path()) {
+-                        return WalkState::Continue;
+-                    }
+-                    let Ok(metadata) = entry.metadata() else {
+-                        return WalkState::Continue;
+-                    };
+-
+-                    if metadata.is_file() {
+-                        let Ok(mut to_open) = to_open.lock() else {
+-                            return WalkState::Quit;
+-                        };
+-                        if to_open.len() == GLOBBING_MAX_N_FILES {
+-                            exceeded_max_n_files.store(true, Ordering::Relaxed);
+-                            return WalkState::Quit;
+-                        }
+-                        to_open.push(entry.into_path());
+-                    }
+-
+-                    WalkState::Continue
+-                })
+-            });
+-
+-        if exceeded_max_n_files.load(Ordering::Relaxed) {
+-            bail!("tried to open more than {GLOBBING_MAX_N_FILES} files at once");
+-        }
+-        let to_open = to_open.into_inner().context("walker thread panicked")?;
+-        if to_open.is_empty() {
+-            // Nothing found to open after globbing. Open a new file
+-            open_file(cx, &path, pos)?;
+-            continue;
+-        }
+-
+-        for path in to_open {
+-            open_file(cx, &path, pos)?;
++        let path = helix_stdx::path::expand_tilde(path);
++        // If the path is a directory, open a file picker on that directory and update the status
++        // message
++        if let Ok(true) = std::fs::canonicalize(&path).map(|p| p.is_dir()) {
++            let callback = async move {
++                let call: job::Callback = job::Callback::EditorCompositor(Box::new(
++                    move |editor: &mut Editor, compositor: &mut Compositor| {
++                        let picker = ui::file_picker(path.into_owned(), &editor.config());
++                        compositor.push(Box::new(overlaid(picker)));
++                    },
++                ));
++                Ok(call)
++            };
++            cx.jobs.callback(callback);
++        } else {
++            // Otherwise, just open the file
++            let _ = cx.editor.open(&path, Action::Replace)?;
++            let (view, doc) = current!(cx.editor);
++            let pos = Selection::point(pos_at_coords(doc.text().slice(..), pos, true));
++            doc.set_selection(view.id, pos);
++            // does not affect opening a buffer without pos
++            align_view(doc, view, Align::Center);
+         }
+     }
+-
+     Ok(())
+ }
+ 
+diff --git a/helix-term/src/ui/mod.rs b/helix-term/src/ui/mod.rs
+index dcdac882d..5211c2e27 100644
+--- a/helix-term/src/ui/mod.rs
++++ b/helix-term/src/ui/mod.rs
+@@ -171,7 +171,7 @@ pub fn raw_regex_prompt(
+ }
+ 
+ pub fn file_picker(root: PathBuf, config: &helix_view::editor::Config) -> Picker<PathBuf> {
+-    use ignore::types::TypesBuilder;
++    use ignore::{types::TypesBuilder, WalkBuilder};
+     use std::time::Instant;
+ 
+     let now = Instant::now();
+@@ -179,9 +179,17 @@ pub fn file_picker(root: PathBuf, config: &helix_view::editor::Config) -> Picker
+     let dedup_symlinks = config.file_picker.deduplicate_links;
+     let absolute_root = root.canonicalize().unwrap_or_else(|_| root.clone());
+ 
+-    let mut walk_builder = config.file_picker.walk_builder(&root);
++    let mut walk_builder = WalkBuilder::new(&root);
+     walk_builder
++        .hidden(config.file_picker.hidden)
++        .parents(config.file_picker.parents)
++        .ignore(config.file_picker.ignore)
++        .follow_links(config.file_picker.follow_symlinks)
++        .git_ignore(config.file_picker.git_ignore)
++        .git_global(config.file_picker.git_global)
++        .git_exclude(config.file_picker.git_exclude)
+         .sort_by_file_name(|name1, name2| name1.cmp(name2))
++        .max_depth(config.file_picker.max_depth)
+         .filter_entry(move |entry| filter_picker_entry(entry, &absolute_root, dedup_symlinks));
+ 
+     walk_builder.add_custom_ignore_filename(helix_loader::config_dir().join("ignore"));
+diff --git a/helix-view/Cargo.toml b/helix-view/Cargo.toml
+index e829b56f1..41ac6f527 100644
+--- a/helix-view/Cargo.toml
++++ b/helix-view/Cargo.toml
+@@ -51,7 +51,6 @@ log = "~0.4"
+ 
+ parking_lot = "0.12.2"
+ 
+-ignore.workspace = true
+ 
+ [target.'cfg(windows)'.dependencies]
+ clipboard-win = { version = "5.3", features = ["std"] }
+diff --git a/helix-view/src/editor.rs b/helix-view/src/editor.rs
+index 68f3ddddf..5540c5182 100644
+--- a/helix-view/src/editor.rs
++++ b/helix-view/src/editor.rs
+@@ -17,7 +17,6 @@
+ use futures_util::stream::select_all::SelectAll;
+ use futures_util::{future, StreamExt};
+ use helix_lsp::{Call, LanguageServerId};
+-use ignore::WalkBuilder;
+ use tokio_stream::wrappers::UnboundedReceiverStream;
+ 
+ use std::{
+@@ -213,25 +212,6 @@ fn default() -> Self {
+     }
+ }
+ 
+-impl FilePickerConfig {
+-    pub fn walk_builder<P>(&self, path: P) -> WalkBuilder
+-    where
+-        P: AsRef<Path>,
+-    {
+-        let mut builder = WalkBuilder::new(path);
+-        builder
+-            .hidden(self.hidden)
+-            .follow_links(self.follow_symlinks)
+-            .parents(self.parents)
+-            .ignore(self.ignore)
+-            .git_ignore(self.git_ignore)
+-            .git_global(self.git_global)
+-            .git_exclude(self.git_exclude)
+-            .max_depth(self.max_depth);
+-        builder
+-    }
+-}
+-
+ fn serialize_alphabet<S>(alphabet: &[char], serializer: S) -> Result<S::Ok, S::Error>
+ where
+     S: Serializer,
