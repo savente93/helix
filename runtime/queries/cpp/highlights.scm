@@ -1,32 +1,9 @@
-; Functions
+; inherits: c
 
-; These casts are parsed as function calls, but are not.
-((identifier) @keyword (#eq? @keyword "static_cast"))
-((identifier) @keyword (#eq? @keyword "dynamic_cast"))
-((identifier) @keyword (#eq? @keyword "reinterpret_cast"))
-((identifier) @keyword (#eq? @keyword "const_cast"))
+; Constants
 
-(call_expression
-  function: (qualified_identifier
-    name: (identifier) @function))
-
-(template_function
-  name: (identifier) @function)
-
-(template_method
-  name: (field_identifier) @function)
-
-(function_declarator
-  declarator: (qualified_identifier
-    name: (identifier) @function))
-
-(function_declarator
-  declarator: (qualified_identifier
-    name: (qualified_identifier
-      name: (identifier) @function)))
-
-(function_declarator
-  declarator: (field_identifier) @function)
+(this) @variable.builtin
+(null) @constant.builtin
 
 ; Types
 
@@ -44,10 +21,38 @@
 (reference_declarator ["&" "&&"] @type.builtin)
 (abstract_reference_declarator ["&" "&&"] @type.builtin)
 
-; Constants
+; Functions
 
-(this) @variable.builtin
-(nullptr) @constant.builtin
+
+(call_expression
+  function: (qualified_identifier
+    name: (identifier) @function))
+
+(template_function
+  name: (identifier) @function)
+
+(template_method
+  name: (field_identifier) @function)
+
+; Support up to 3 levels of nesting of qualifiers
+; i.e. a::b::c::func();
+(function_declarator
+  declarator: (qualified_identifier
+    name: (identifier) @function))
+
+(function_declarator
+  declarator: (qualified_identifier
+    name: (qualified_identifier
+      name: (identifier) @function)))
+
+(function_declarator
+  declarator: (qualified_identifier
+    name: (qualified_identifier
+      name: (qualified_identifier
+        name: (identifier) @function))))
+
+(function_declarator
+  declarator: (field_identifier) @function)
 
 ; Parameters
 
@@ -69,6 +74,13 @@
   "[]"
   "()"
 ] @operator
+
+
+; These casts are parsed as function calls, but are not.
+((identifier) @keyword (#eq? @keyword "static_cast"))
+((identifier) @keyword (#eq? @keyword "dynamic_cast"))
+((identifier) @keyword (#eq? @keyword "reinterpret_cast"))
+((identifier) @keyword (#eq? @keyword "const_cast"))
 
 [
   "co_await"
@@ -132,5 +144,3 @@
 ; Strings
 
 (raw_string_literal) @string
-
-; inherits: c
